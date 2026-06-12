@@ -1,0 +1,35 @@
+{{define "content"}}
+<div class="max-w-md">
+  <div class="mb-4">
+    <a href="/folders" class="text-indigo-600 hover:underline text-sm">← Folders</a>
+  </div>
+
+  <h1 class="text-2xl font-bold text-gray-800 mb-6">New Folder</h1>
+
+  <div class="bg-white border border-gray-200 rounded-lg p-6">
+    {{if .Errors}}
+    <div class="bg-red-50 border border-red-300 rounded p-4 text-sm text-red-700 mb-5">
+      <ul class="list-disc pl-5">
+        {{range .Errors}}<li>{{.}}</li>{{end}}
+      </ul>
+    </div>
+    {{end}}
+
+    <form method="post" action="/folders" class="space-y-5">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
+        <input type="text" name="name" value="{{.Name}}"
+               placeholder="e.g. Tech Companies"
+               class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+      </div>
+
+      <button type="submit"
+              class="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 cursor-pointer font-medium">
+        Create Folder
+      </button>
+    </form>
+  </div>
+</div>
+{{end}}

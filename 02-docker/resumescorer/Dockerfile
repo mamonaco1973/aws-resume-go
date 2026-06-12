@@ -1,41 +1,46 @@
-# ==============================================================================
-# Resume Scorer Rails Application — Docker Image
-# ==============================================================================
-# Single-stage build; bundle install runs at build time and the gem cache is
-# baked into the layer so runtime startup is fast.
-# ==============================================================================
+# ================================================================================
+# Resume Scorer Go Application — Multi-Stage Docker Build
+# ================================================================================
+# Stage 1 (builder): compile the Go binary with all dependencies resolved.
+# Stage 2 (runtime): copy only the binary and startup.sh into a minimal
+# Alpine image. Result is ~20 MB vs ~800 MB for the Rails equivalent.
+# ================================================================================
 
-FROM ruby:3.3-slim
+# ================================================================================
+# Stage 1 — Build
+# ================================================================================
+FROM golang:1.22-alpine AS builder
 
-# System dependencies for pg, nokogiri (bundled libxml2 needs pkg-config),
-# and pdf-reader (pure Ruby, no native deps beyond Ruby itself)
-RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-      build-essential \
-      libpq-dev \
-      libyaml-dev \
-      pkg-config \
-      curl \
-      git \
-      libvips \
-  && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+
+# Copy all source first so go mod tidy can resolve imports from the code.
+# This differs from the classic "copy go.mod first" pattern but is required
+# here because go.sum may not exist on a fresh clone — tidy generates it.
+COPY . .
+
+# tidy generates/updates go.sum, download fetches all modules into the
+# module cache, then build compiles the static binary.
+RUN go mod tidy && go mod download
+
+# CGO_ENABLED=0 produces a fully static binary with no libc dependency so
+# the runtime image can be stripped down to Alpine with no extra libraries.
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o resumescorer .
+
+# ================================================================================
+# Stage 2 — Runtime
+# ================================================================================
+FROM alpine:3.19
+
+# ca-certificates: needed for TLS connections to AWS (Bedrock, S3, Secrets Manager)
+# curl: used by startup.sh health check
+RUN apk add --no-cache ca-certificates curl
 
 WORKDIR /app
 
-# Install gems before copying app code — improves Docker layer caching
-COPY Gemfile ./
-RUN bundle install --jobs 4 --retry 3
-
-# Copy application source
-COPY . .
-
-# Create directories Rails expects at runtime
-RUN mkdir -p tmp/pids tmp/cache tmp/sockets log
-
-# Precompile Sprockets assets with a dummy key (real key injected at runtime)
-RUN SECRET_KEY_BASE=dummy RAILS_ENV=production bundle exec rails assets:precompile 2>/dev/null || true
+COPY --from=builder /build/resumescorer .
+COPY startup.sh .
+RUN chmod +x startup.sh
 
 EXPOSE 3000
 
-# startup.sh runs migrations then starts Puma + Sidekiq
-RUN chmod +x startup.sh
 ENTRYPOINT ["./startup.sh"]

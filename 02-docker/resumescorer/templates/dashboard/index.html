@@ -1,0 +1,152 @@
+{{define "content"}}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-800">My Jobs</h1>
+  <a href="/jobs/new"
+     class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium">
+    Score a Job
+  </a>
+</div>
+
+<!-- Token usage ring -->
+<div class="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex items-center gap-6">
+  <svg width="56" height="56" viewBox="0 0 56 56">
+    <circle cx="28" cy="28" r="20" fill="none" stroke="#e5e7eb" stroke-width="6"/>
+    <circle cx="28" cy="28" r="20" fill="none"
+            stroke="{{if ge .TokenPct 90}}#ef4444{{else if ge .TokenPct 60}}#f59e0b{{else}}#6366f1{{end}}"
+            stroke-width="6"
+            stroke-dasharray="125.7"
+            stroke-dashoffset="{{dashOffset 125.7 .TokenPct}}"
+            stroke-linecap="round"
+            transform="rotate(-90 28 28)"/>
+    <text x="28" y="33" text-anchor="middle" font-size="11" font-weight="600"
+          fill="{{if ge .TokenPct 90}}#ef4444{{else}}#374151{{end}}">{{.TokenPct}}%</text>
+  </svg>
+  <div>
+    <p class="text-sm font-medium text-gray-700">Bedrock Token Usage</p>
+    <p class="text-xs text-gray-500">
+      {{numFmt .TokensUsed}} / {{numFmt .TokenLimit}} tokens used
+    </p>
+  </div>
+</div>
+
+<!-- Filters — select auto-submits; text input debounces 400 ms -->
+<div class="flex flex-wrap gap-3 mb-4">
+  <form id="filter-form" action="/" method="get" class="flex gap-2">
+    <input type="text" name="q" id="filter-q" value="{{.FilterQ}}"
+           placeholder="Search title or company..."
+           class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-56">
+    <select name="folder_id" id="filter-folder"
+            class="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+      <option value="">All folders</option>
+      {{range .Folders}}
+        <option value="{{.ID}}" {{if eq (printf "%d" .ID) $.FilterFolderID}}selected{{end}}>
+          {{.Name}}
+        </option>
+      {{end}}
+    </select>
+  </form>
+</div>
+
+<script>
+  (function() {
+    var form   = document.getElementById("filter-form");
+    var search = document.getElementById("filter-q");
+    var folder = document.getElementById("filter-folder");
+    var timer  = null;
+    folder.addEventListener("change", function() { form.submit(); });
+    search.addEventListener("input", function() {
+      clearTimeout(timer);
+      timer = setTimeout(function() { form.submit(); }, 400);
+    });
+  })();
+</script>
+
+{{if .Jobs}}
+<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-200">
+      <tr>
+        <th class="px-4 py-3 text-left font-medium text-gray-600 w-20">Score</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Title</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Company</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Resume</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Folder</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Status</th>
+        <th class="px-4 py-3 text-left font-medium text-gray-600">Date</th>
+        <th class="px-4 py-3 w-10"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {{range .Jobs}}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3">
+          {{if and .Scored .Score}}
+            {{$color := .ScoreColor}}
+            <span class="inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold
+              {{if eq $color "green"}}bg-green-100 text-green-800
+              {{else if eq $color "yellow"}}bg-yellow-100 text-yellow-800
+              {{else}}bg-red-100 text-red-800{{end}}">
+              {{.Score}}
+            </span>
+          {{else if .Processing}}
+            <span class="text-gray-400 text-xs">...</span>
+          {{else}}
+            <span class="text-gray-300">-</span>
+          {{end}}
+        </td>
+        <td class="px-4 py-3 font-medium">
+          <a href="/jobs/{{.ID}}" class="text-indigo-600 hover:underline">
+            {{if .Title}}{{.Title}}{{else}}(untitled){{end}}
+          </a>
+        </td>
+        <td class="px-4 py-3 text-gray-600">{{if .Company}}{{.Company}}{{else}}-{{end}}</td>
+        <td class="px-4 py-3 text-gray-500 text-xs">{{if .Resume}}{{.Resume.Name}}{{end}}</td>
+        <td class="px-4 py-3 text-gray-500 text-xs">{{if .Folder}}{{.Folder.Name}}{{else}}-{{end}}</td>
+        <td class="px-4 py-3">
+          {{$s := .Status}}
+          <span class="px-2 py-0.5 rounded text-xs font-medium
+            {{if eq $s "scored"}}bg-green-100 text-green-700
+            {{else if eq $s "scoring"}}bg-yellow-100 text-yellow-700
+            {{else if eq $s "pending"}}bg-gray-100 text-gray-600
+            {{else}}bg-red-100 text-red-700{{end}}">
+            {{.Status}}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-gray-400 text-xs">{{fmtDate .CreatedAt}}</td>
+        <td class="px-4 py-3">
+          <form method="post" action="/jobs/{{.ID}}"
+                data-confirm="Delete this job?"
+                class="inline">
+            <input type="hidden" name="_method" value="DELETE">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <button type="submit"
+                class="text-gray-300 hover:text-red-500 text-xs bg-transparent border-0 cursor-pointer p-0">
+              ✕
+            </button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-lg mb-3">No jobs yet.</p>
+  <a href="/jobs/new" class="text-indigo-600 hover:underline">Score your first job →</a>
+</div>
+{{end}}
+
+{{if .AnyProcessing}}
+<div id="auto-refresh-bar"
+     class="fixed bottom-4 right-4 bg-indigo-700 text-white text-xs px-4 py-2 rounded-full shadow-lg flex items-center gap-2">
+  <span class="inline-block w-2 h-2 bg-white rounded-full animate-pulse"></span>
+  <span>Scoring in progress — refreshing…</span>
+</div>
+<script>
+  // Reload every 5 s while jobs are pending/scoring.
+  // Server omits this block once all jobs reach a terminal state.
+  setTimeout(function() { window.location.reload(); }, 5000);
+</script>
+{{end}}
+{{end}}

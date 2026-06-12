@@ -1,0 +1,45 @@
+{{define "content"}}
+<div class="max-w-2xl">
+  <div class="mb-4">
+    <a href="/resumes" class="text-indigo-600 hover:underline text-sm">← My Resumes</a>
+  </div>
+
+  <h1 class="text-2xl font-bold text-gray-800 mb-6">Add Resume</h1>
+
+  <div class="bg-white border border-gray-200 rounded-lg p-6">
+    {{if .Errors}}
+    <div class="bg-red-50 border border-red-300 rounded p-4 text-sm text-red-700 mb-5">
+      <ul class="list-disc pl-5">
+        {{range .Errors}}<li>{{.}}</li>{{end}}
+      </ul>
+    </div>
+    {{end}}
+
+    <form method="post" action="/resumes" class="space-y-5">
+      <input type="hidden" name="_csrf" value="{{.CSRF}}">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Resume Name</label>
+        <input type="text" name="name" value="{{.Name}}"
+               placeholder="e.g. Software Engineer Resume 2024"
+               class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Resume Text</label>
+        <textarea name="content_text" rows="20"
+                  placeholder="Paste your resume as plain text here..."
+                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400">{{.ContentText}}</textarea>
+        <p class="text-xs text-gray-500 mt-1">
+          Paste plain text. If copying from a PDF, use "copy as text" or a tool like pdftotext first.
+        </p>
+      </div>
+
+      <button type="submit"
+              class="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 cursor-pointer font-medium">
+        Save Resume
+      </button>
+    </form>
+  </div>
+</div>
+{{end}}

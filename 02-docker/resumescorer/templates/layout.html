@@ -1,0 +1,104 @@
+{{define "layout.html"}}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Resume Scorer</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+
+    <nav class="bg-indigo-700 text-white shadow-md">
+      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+        <a href="/" class="text-xl font-bold tracking-tight">Resume Scorer</a>
+        <div class="flex items-center gap-4 text-sm">
+          {{if .CurrentUser}}
+            <a href="/"          class="hover:text-indigo-200">Dashboard</a>
+            <a href="/resumes"   class="hover:text-indigo-200">Resumes</a>
+            <a href="/folders"   class="hover:text-indigo-200">Folders</a>
+            <a href="/jobs/new"  class="hover:text-indigo-200">Score a Job</a>
+            <span class="text-indigo-300 text-xs">{{.CurrentUser.Email}}</span>
+            <a href="/signout"
+               class="bg-white text-indigo-700 px-3 py-1 rounded hover:bg-indigo-50 text-xs">
+              Sign out
+            </a>
+          {{else}}
+            <a href="/signin" class="hover:text-indigo-200">Sign in</a>
+            <a href="/signup"
+               class="bg-white text-indigo-700 px-3 py-1 rounded hover:bg-indigo-50">
+              Sign up
+            </a>
+          {{end}}
+        </div>
+      </div>
+    </nav>
+
+    {{if .Notice}}
+    <div class="max-w-6xl mx-auto px-4 mt-4">
+      <div class="border rounded px-4 py-3 mb-4 bg-green-50 border-green-300 text-green-800">
+        {{.Notice}}
+      </div>
+    </div>
+    {{end}}
+    {{if .Alert}}
+    <div class="max-w-6xl mx-auto px-4 mt-4">
+      <div class="border rounded px-4 py-3 mb-4 bg-red-50 border-red-300 text-red-800">
+        {{.Alert}}
+      </div>
+    </div>
+    {{end}}
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+      {{template "content" .}}
+    </main>
+
+    <!-- Confirm-delete modal -->
+    <div id="confirm-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/40"></div>
+      <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+        <p id="confirm-message" class="text-gray-800 font-medium mb-5 text-center"></p>
+        <div class="flex gap-3 justify-center">
+          <button id="confirm-cancel"
+              class="px-5 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50">
+            Cancel
+          </button>
+          <button id="confirm-ok"
+              class="px-5 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-700">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const modal     = document.getElementById("confirm-modal");
+      const msgEl     = document.getElementById("confirm-message");
+      const okBtn     = document.getElementById("confirm-ok");
+      const cancelBtn = document.getElementById("confirm-cancel");
+      let pendingForm = null;
+
+      document.addEventListener("click", function(e) {
+        const btn = e.target.closest("input[type=submit], button[type=submit]");
+        if (!btn) return;
+        const form = btn.closest("form[data-confirm]");
+        if (!form) return;
+        e.preventDefault();
+        msgEl.textContent = form.dataset.confirm;
+        pendingForm = form;
+        modal.classList.remove("hidden");
+      });
+
+      okBtn.addEventListener("click", function() {
+        modal.classList.add("hidden");
+        if (pendingForm) { pendingForm.submit(); pendingForm = null; }
+      });
+      cancelBtn.addEventListener("click", function() {
+        modal.classList.add("hidden");
+        pendingForm = null;
+      });
+    </script>
+
+  </body>
+</html>
+{{end}}

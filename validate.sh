@@ -3,14 +3,14 @@
 # Script Name: validate.sh
 # ================================================================================================
 # Purpose:
-#   Validates that the Resume Scorer is reachable over HTTPS and Rails is
-#   responding. Polls the Devise sign-in page until HTTP 200 is received.
-#   Fargate tasks need time to start, run migrations, and join the target group.
+#   Validates that the Resume Scorer (Go) is reachable over HTTPS and
+#   responding. Polls the sign-in page until HTTP 200 is received.
+#   Fargate tasks need time to start, run AutoMigrate, seed, and join the ALB.
 # ================================================================================================
 
 MAX_ATTEMPTS=40
 SLEEP_SECONDS=15
-APP_URL="https://myjobs-ror.mikes-cloud-solutions.com/users/sign_in"
+APP_URL="https://myjobs-ror.mikes-cloud-solutions.com/signin"
 
 echo "NOTE: Waiting for ${APP_URL} to return HTTP 200..."
 
@@ -25,6 +25,7 @@ for ((i=1; i<=MAX_ATTEMPTS; i++)); do
   if [ "$STATUS" = "200" ]; then
     echo "NOTE: Resume Scorer is healthy (HTTP 200)."
     echo "NOTE: URL: https://myjobs-ror.mikes-cloud-solutions.com"
+    echo "NOTE: Demo login: demo@example.com / password123"
     exit 0
   fi
 

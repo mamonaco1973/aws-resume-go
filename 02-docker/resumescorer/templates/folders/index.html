@@ -1,0 +1,49 @@
+{{define "content"}}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-800">Folders</h1>
+  <a href="/folders/new"
+     class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium">
+    New Folder
+  </a>
+</div>
+
+{{if .Folders}}
+<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-200">
+      <tr>
+        <th class="px-5 py-3 text-left font-medium text-gray-600">Name</th>
+        <th class="px-5 py-3 text-left font-medium text-gray-600">Jobs</th>
+        <th class="px-5 py-3 w-24"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {{range .Folders}}
+      <tr class="hover:bg-gray-50">
+        <td class="px-5 py-3 font-medium">
+          <a href="/?folder_id={{.ID}}" class="text-indigo-600 hover:underline">{{.Name}}</a>
+        </td>
+        <td class="px-5 py-3 text-gray-500">{{len .Jobs}}</td>
+        <td class="px-5 py-3 text-right">
+          <form method="post" action="/folders/{{.ID}}"
+                data-confirm="Delete folder? Jobs will be unassigned.">
+            <input type="hidden" name="_method" value="DELETE">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <button type="submit"
+                class="text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer p-0">
+              Delete
+            </button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-lg mb-3">No folders yet.</p>
+  <a href="/folders/new" class="text-indigo-600 hover:underline">Create a folder →</a>
+</div>
+{{end}}
+{{end}}

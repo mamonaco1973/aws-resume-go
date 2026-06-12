@@ -3,7 +3,7 @@
 # Script Name: apply.sh
 # ================================================================================================
 # Purpose:
-#   Deploys the Resume Scorer Ruby on Rails application end-to-end on AWS.
+#   Deploys the Resume Scorer Go application end-to-end on AWS.
 #
 # Deployment Phases:
 #   1. Network infrastructure (VPC, RDS, ElastiCache Redis, ECR, S3, Secrets Manager)
@@ -23,7 +23,7 @@
 # -----------------------------------------------------------------------------------------------
 export AWS_DEFAULT_REGION="us-east-1"
 IMAGE_TAG=$(date +%Y%m%d%H%M%S)
-APP_HOSTNAME="myjobs-ror.mikes-cloud-solutions.com"
+APP_HOSTNAME="myjobs-go.mikes-cloud-solutions.com"
 set -euo pipefail
 
 # -----------------------------------------------------------------------------------------------
@@ -61,7 +61,9 @@ cd .. || exit
 # ================================================================================================
 # Phase 2: Build and Push Docker Image
 # ================================================================================================
-# Builds the Rails application container and pushes it to ECR.
+# Builds the Go application container (multi-stage) and pushes it to ECR.
+# go mod tidy and compilation run inside the Docker builder stage — no local
+# Go installation required. The runtime image is ~20 MB (Alpine + static binary).
 # ================================================================================================
 echo "NOTE: Building and pushing Docker image to ECR..."
 cd 02-docker/resumescorer || { echo "ERROR: 02-docker/resumescorer not found."; exit 1; }

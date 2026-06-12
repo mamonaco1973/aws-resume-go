@@ -1,0 +1,51 @@
+{{define "content"}}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-800">My Resumes</h1>
+  <a href="/resumes/new"
+     class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium">
+    Add Resume
+  </a>
+</div>
+
+{{if .Resumes}}
+<div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-200">
+      <tr>
+        <th class="px-5 py-3 text-left font-medium text-gray-600">Name</th>
+        <th class="px-5 py-3 text-left font-medium text-gray-600">Characters</th>
+        <th class="px-5 py-3 text-left font-medium text-gray-600">Added</th>
+        <th class="px-5 py-3 w-16"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {{range .Resumes}}
+      <tr class="hover:bg-gray-50">
+        <td class="px-5 py-3 font-medium">
+          <a href="/resumes/{{.ID}}" class="text-indigo-600 hover:underline">{{.Name}}</a>
+        </td>
+        <td class="px-5 py-3 text-gray-500">{{numFmt (len .ContentText)}}</td>
+        <td class="px-5 py-3 text-gray-500 text-xs">{{fmtDate .CreatedAt}}</td>
+        <td class="px-5 py-3 text-right">
+          <form method="post" action="/resumes/{{.ID}}"
+                data-confirm="Delete this resume?">
+            <input type="hidden" name="_method" value="DELETE">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+            <button type="submit"
+                class="text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer p-0">
+              Delete
+            </button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-lg mb-3">No resumes yet.</p>
+  <a href="/resumes/new" class="text-indigo-600 hover:underline">Add your first resume →</a>
+</div>
+{{end}}
+{{end}}
