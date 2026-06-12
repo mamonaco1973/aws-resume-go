@@ -1,0 +1,42 @@
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-800">Folders</h1>
+  <%= link_to "New Folder", new_folder_path,
+      class: "bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-medium" %>
+</div>
+
+<% if @folders.any? %>
+  <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b border-gray-200">
+        <tr>
+          <th class="px-5 py-3 text-left font-medium text-gray-600">Name</th>
+          <th class="px-5 py-3 text-left font-medium text-gray-600">Jobs</th>
+          <th class="px-5 py-3 w-24"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <% @folders.each do |folder| %>
+          <tr class="hover:bg-gray-50">
+            <td class="px-5 py-3 font-medium text-gray-800">
+              <%= link_to folder.name, root_path(folder_id: folder.id),
+                  class: "text-indigo-600 hover:underline" %>
+            </td>
+            <td class="px-5 py-3 text-gray-500"><%= folder.jobs.count %></td>
+            <td class="px-5 py-3 text-right">
+              <%= form_with url: folder_path(folder), method: :delete, local: true,
+                  data: { confirm: "Delete folder? Jobs will be unassigned." } do %>
+                <%= submit_tag "Delete", class: "text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer p-0" %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+<% else %>
+  <div class="text-center py-16 text-gray-500">
+    <p class="text-lg mb-3">No folders yet.</p>
+    <%= link_to "Create a folder →", new_folder_path,
+        class: "text-indigo-600 hover:underline" %>
+  </div>
+<% end %>

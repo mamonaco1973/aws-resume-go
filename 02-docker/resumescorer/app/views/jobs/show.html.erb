@@ -1,0 +1,150 @@
+<div class="max-w-3xl">
+  <div class="mb-4 flex items-center justify-between">
+    <%= link_to "← Dashboard", root_path, class: "text-indigo-600 hover:underline text-sm" %>
+    <%= form_with url: job_path(@job), method: :delete, local: true,
+        data: { confirm: "Delete this job and all its data?" } do %>
+      <%= submit_tag "Delete", class: "text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer p-0" %>
+    <% end %>
+  </div>
+
+  <%# Header card with score ring %>
+  <div class="bg-white border border-gray-200 rounded-lg p-6 mb-4 flex gap-6">
+    <%# Score ring %>
+    <div class="flex-shrink-0">
+      <% if @job.scored? && @job.score %>
+        <% color = @job.score_color
+           stroke = color == "green" ? "#22c55e" : color == "yellow" ? "#f59e0b" : "#ef4444"
+           ring_bg = color == "green" ? "#dcfce7" : color == "yellow" ? "#fef3c7" : "#fee2e2"
+           text_color = color == "green" ? "#166534" : color == "yellow" ? "#92400e" : "#991b1b" %>
+        <div class="relative flex items-center justify-center">
+          <svg width="80" height="80" viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="30" fill="<%= ring_bg %>" stroke="#e5e7eb" stroke-width="8"/>
+            <circle cx="40" cy="40" r="30" fill="none"
+                    stroke="<%= stroke %>"
+                    stroke-width="8"
+                    stroke-dasharray="188.5"
+                    stroke-dashoffset="<%= (188.5 * (1 - @job.score / 100.0)).round(1) %>"
+                    stroke-linecap="round"
+                    transform="rotate(-90 40 40)"/>
+            <text x="40" y="46" text-anchor="middle" font-size="22" font-weight="700"
+                  fill="<%= text_color %>"><%= @job.score %></text>
+          </svg>
+        </div>
+      <% elsif @job.processing? %>
+        <div class="w-20 h-20 flex items-center justify-center bg-gray-100 rounded-full">
+          <span class="text-gray-400 text-xs text-center leading-tight">Scoring...</span>
+        </div>
+      <% else %>
+        <div class="w-20 h-20 flex items-center justify-center bg-red-50 rounded-full">
+          <span class="text-red-400 text-xs text-center leading-tight">Error</span>
+        </div>
+      <% end %>
+    </div>
+
+    <div class="flex-1">
+      <h1 class="text-xl font-bold text-gray-900"><%= @job.title.presence || "(pending extraction)" %></h1>
+      <p class="text-gray-600 text-sm mt-0.5"><%= @job.company.presence || "" %></p>
+      <div class="flex flex-wrap gap-2 mt-2 text-xs">
+        <% badge_class = case @job.status
+           when "scored"  then "bg-green-100 text-green-700"
+           when "scoring" then "bg-yellow-100 text-yellow-700"
+           when "pending" then "bg-gray-100 text-gray-600"
+           when "error"   then "bg-red-100 text-red-700"
+           end %>
+        <span class="px-2 py-0.5 rounded font-medium <%= badge_class %>"><%= @job.status.capitalize %></span>
+        <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+          Resume: <%= @job.resume.name %>
+        </span>
+      </div>
+      <%# Inline folder selector — allows moving the job after scoring %>
+      <% if @folders.any? %>
+        <%= form_with url: job_path(@job), method: :patch, local: true,
+            class: "flex items-center gap-2 mt-2" do |f| %>
+          <%= f.select :folder_id,
+              options_from_collection_for_select(@folders, :id, :name, @job.folder_id),
+              { include_blank: "No folder" },
+              class: "border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400" %>
+          <%= f.submit "Move",
+              class: "text-xs bg-gray-100 border border-gray-300 text-gray-600 px-3 py-1 rounded hover:bg-gray-200 cursor-pointer" %>
+        <% end %>
+      <% end %>
+      <% if @job.errored? && @job.status_message.present? %>
+        <p class="text-red-600 text-xs mt-2"><%= @job.status_message %></p>
+      <% end %>
+      <p class="text-gray-400 text-xs mt-1">Submitted <%= time_ago_in_words(@job.created_at) %> ago</p>
+    </div>
+  </div>
+
+  <%# AI analysis %>
+  <% if @job.analysis.present? %>
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mb-4">
+      <h2 class="font-semibold text-gray-800 mb-3">AI Analysis</h2>
+      <div class="text-sm text-gray-700 space-y-3 whitespace-pre-wrap leading-relaxed">
+        <%= @job.analysis %>
+      </div>
+    </div>
+  <% end %>
+
+  <%# Notes %>
+  <div class="bg-white border border-gray-200 rounded-lg p-6 mb-4">
+    <h2 class="font-semibold text-gray-800 mb-3">Notes</h2>
+    <%= form_with model: @job, url: job_path(@job), method: :patch, local: true do |f| %>
+      <%= f.text_area :notes, rows: 4, placeholder: "Add notes about this job...",
+          class: "w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" %>
+      <%= f.submit "Save Notes",
+          class: "mt-2 bg-gray-100 border border-gray-300 text-gray-700 px-4 py-1.5 rounded text-sm hover:bg-gray-200 cursor-pointer" %>
+    <% end %>
+  </div>
+
+  <%# Attachments %>
+  <div class="bg-white border border-gray-200 rounded-lg p-6 mb-4">
+    <h2 class="font-semibold text-gray-800 mb-3">Attachments</h2>
+
+    <% if @attachments.any? %>
+      <ul class="divide-y divide-gray-100 mb-4">
+        <% @attachments.each do |att| %>
+          <li class="py-2 flex items-center justify-between text-sm">
+            <div>
+              <% if att.file.attached? %>
+                <%= link_to att.filename,
+                    rails_blob_path(att.file, disposition: "attachment"),
+                    class: "text-indigo-600 hover:underline" %>
+              <% else %>
+                <span class="text-gray-600"><%= att.filename %></span>
+              <% end %>
+              <% if att.notes.present? %>
+                <p class="text-xs text-gray-400 mt-0.5"><%= att.notes %></p>
+              <% end %>
+            </div>
+            <%= form_with url: job_attachment_path(@job, att), method: :delete, local: true,
+                data: { confirm: "Remove this attachment?" } do %>
+              <%= submit_tag "Remove", class: "text-xs text-red-500 hover:text-red-700 bg-transparent border-0 cursor-pointer p-0" %>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+
+    <%= form_with url: job_attachments_path(@job), local: true,
+        html: { enctype: "multipart/form-data" } do |f| %>
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
+          <%= f.file_field "attachment[file]", accept: ".pdf,.doc,.docx,.txt,.jpg,.png",
+              class: "w-full border border-gray-300 rounded px-3 py-1.5 text-sm" %>
+        </div>
+        <%= f.submit "Upload",
+            class: "bg-gray-100 border border-gray-300 text-gray-700 px-4 py-1.5 rounded text-sm hover:bg-gray-200 cursor-pointer" %>
+      </div>
+    <% end %>
+  </div>
+
+  <%# Job description text (collapsed) %>
+  <% if @job.job_description_text.present? %>
+    <details class="bg-white border border-gray-200 rounded-lg p-6">
+      <summary class="font-semibold text-gray-800 cursor-pointer">Job Description (extracted)</summary>
+      <div class="mt-3 text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">
+        <%= @job.job_description_text %>
+      </div>
+    </details>
+  <% end %>
+</div>
