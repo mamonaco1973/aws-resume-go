@@ -1,297 +1,138 @@
-# AWS Resume Scorer — Go on ECS Fargate
+# Resume Scorer on AWS: Go on ECS Fargate with RDS, Redis and Bedrock
 
-This project delivers a fully functional **AI-powered resume scoring
-application** on AWS, built with **Go (Gin + GORM)**, deployed as a
-**Docker container on Amazon ECS Fargate**, and backed by **Amazon RDS
-(PostgreSQL)**, **Amazon ElastiCache (Redis)**, **Amazon S3**, and
-**AWS Bedrock (Claude Haiku)**.
+An AI **resume scoring** web app written in **Go** (Gin, GORM,
+`html/template`) and run as one container on **ECS Fargate** behind an
+**Application Load Balancer**. Users paste resumes and submit job postings
+by URL, LinkedIn job ID or pasted text; a background worker in the same
+process has **Claude Haiku on Amazon Bedrock** extract the job and score the
+resume from 0 to 100 with an overview, strengths and weaknesses. Data lives
+in **RDS PostgreSQL**, the job queue in **ElastiCache Redis** (Asynq), and
+attachments in **S3**.
 
-Users paste resumes and submit job postings (by URL or pasted text).
-Bedrock scores each resume against the job (0–100) with an Overview,
-Strengths, and Weaknesses analysis. Scoring runs asynchronously via Asynq
-(a Redis-backed task queue) so the UI stays responsive while the AI works.
+This is a Go port of [aws-resume-ror](https://github.com/mamonaco1973/aws-resume-ror),
+with the same features, UI and infrastructure.
 
-It uses **Terraform** to provision all infrastructure and a single `apply.sh`
-script to build and deploy the entire stack end-to-end — from VPC and database
-to container image and running ECS service. No local Go installation required;
-all compilation happens inside the Docker builder stage.
-
-This is a port of the [aws-resume-ror](https://github.com/mamonaco1973/aws-resume-app-ror)
-Ruby on Rails version, replacing the Rails stack with idiomatic Go while
-keeping the same features, UI, and Terraform infrastructure.
-
-## Key Capabilities Demonstrated
-
-1. **Go Web Application with Gin** — HTTP routing via Gin, GORM v2 for
-   PostgreSQL access with AutoMigrate on startup, and `html/template` with
-   `//go:embed` for zero-file-copy template and static asset serving.
-2. **AWS Bedrock AI Integration** — Two-call Claude Haiku pipeline: extract
-   title/company/description from a URL or raw text, then score the resume
-   against the extracted job description. All calls use AWS SDK v2
-   `bedrockruntime.InvokeModel` from an Asynq worker goroutine.
-3. **Token Usage Tracking** — Each user has a lifetime token budget (default
-   100,000). Bedrock token counts accumulate after each call via an atomic
-   SQL `UPDATE ... SET tokens_used = tokens_used + ?`. A usage ring on the
-   dashboard shows consumption.
-4. **File Uploads to S3** — Attachments are uploaded directly with the AWS
-   SDK v2 S3 manager. The S3 object key is stored on the Attachment record;
-   downloads use 15-minute presigned URLs. No ActiveStorage blob tables.
-5. **Background Job Processing** — Asynq runs as a goroutine in the same
-   process as the HTTP server, processing scoring tasks from Redis. Single
-   binary, single container — no separate worker process.
-6. **ECS Fargate Container Deployment** — Go runs serverlessly on Fargate with
-   no EC2 instances to manage. All secrets are injected from Secrets Manager
-   at task startup — credentials never touch the image. The Docker runtime
-   image is ~20 MB (Alpine + static binary) vs ~800 MB for the Rails version.
-7. **RDS PostgreSQL + ElastiCache Redis** — Managed PostgreSQL stores all
-   application data. Redis backs the Asynq queue. GORM AutoMigrate creates
-   and evolves the schema on every startup.
-8. **Terraform Infrastructure as Code** — All AWS resources (VPC, RDS,
-   ElastiCache, ECR, S3, Secrets Manager, ALB, ECS) provisioned in three
-   Terraform phases with explicit dependency ordering.
-9. **Session Auth Without an Identity Provider** — gorilla/sessions
-   CookieStore with keys derived from `SECRET_KEY_BASE`. CSRF tokens are
-   generated per-session and validated on every state-changing request.
-   bcrypt handles password hashing.
+| Piece | Where | Role |
+|---|---|---|
+| **VPC** | `10.0.0.0/23`, us-east-1 | two public and two private `/26` subnets across two AZs; a NAT gateway for the private subnets |
+| **Application Load Balancer** | public subnets | HTTPS on 443 with an ACM certificate (TLS 1.3 policy); 80 redirects to 443; forwards to the task on 3000 |
+| **Route 53** + **ACM** | your hosted zone | DNS validation for the certificate and an alias record for the app's hostname |
+| **ECS Fargate service** | private subnets | one task, 1 vCPU and 2 GB, running the Gin server and an Asynq worker (concurrency 5) in one binary; ECS Exec enabled; logs to `/ecs/resumescorer` for 7 days |
+| **RDS PostgreSQL 16** | private subnets | `db.t3.micro`, 20 GB, not public; GORM creates the schema on startup |
+| **ElastiCache Redis 7** | private subnets | `cache.t3.micro`, one node; the Asynq queue |
+| **resumescorer-uploads-&lt;random&gt;** | S3 | private; attachments, downloaded through 15-minute presigned URLs |
+| **resumescorer** | ECR | the app image, tagged with the build time |
+| **Secrets Manager** | us-east-1 | `resumescorer_database_url`, `_redis_url`, `_secret_key_base`, `_bedrock_model_id`, `_smtp_user`, `_smtp_password`, injected into the task at start |
 
 ## Architecture
 
-```
-Internet
-    │
-    ▼
-Application Load Balancer (public subnets, port 443/80)
-    │
-    ▼
-ECS Fargate Task (private subnets, port 3000)
-  └── Go binary
-        ├── Gin HTTP server
-        └── Asynq worker goroutine (scoring tasks, Redis queue)
-               │
-               ▼
-          AWS Bedrock (Claude Haiku — extract + score)
-    │                   │
-    ▼                   ▼
-RDS PostgreSQL     ElastiCache Redis
-(private subnet)   (private subnet)
-    │
-    ▼
-S3 (attachments — direct SDK upload, presigned download URLs)
-Secrets Manager (DATABASE_URL, REDIS_URL, SECRET_KEY_BASE,
-                 BEDROCK_MODEL_ID, SMTP_USER, SMTP_PASSWORD)
-ECR (container image)
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
+  <img alt="A browser resolves the app's hostname through a Route 53 alias record and connects over HTTPS to an Application Load Balancer in the public subnets, which uses a DNS-validated ACM certificate and redirects port 80. The load balancer forwards to one ECS Fargate task on port 3000 in the private subnets, running a Go binary with the Gin web server and an Asynq worker. The task pulls its image from ECR, gets six settings from Secrets Manager at start, stores data in RDS PostgreSQL, queues scoring work in ElastiCache Redis, keeps attachments in S3, and calls Claude Haiku on Amazon Bedrock through the NAT gateway." src="architecture-light.svg">
+</picture>
+
+Regenerate with `python3 make_diagram.py`.
+
+- **`01-network/`**: the VPC and NAT gateway, RDS, ElastiCache, ECR, the
+  uploads bucket and the secrets (database and Redis passwords are random).
+- **`02-docker/resumescorer/`**: the Go app (`main.go`, `internal/`,
+  `templates/`) and a multi-stage `Dockerfile` that compiles it, so no local
+  Go install is needed.
+- **`03-ecs/`**: the certificate and DNS records, the load balancer, the
+  cluster, task definition and service, the security groups and the two
+  roles.
+
+The load balancer's security group allows 80 and 443 from anywhere; the
+task's allows 3000 only from the load balancer; PostgreSQL and Redis allow
+5432 and 6379 from the VPC. The task's execution role pulls the image and
+reads the six secrets; its runtime role can use the uploads bucket, call
+`bedrock:InvokeModel` and use ECS Exec.
+
+## How a job is scored
+
+1. Users sign up and sign in with an email and password (bcrypt); sessions
+   are signed cookies keyed from `SECRET_KEY_BASE`, valid for 30 days, and
+   every form carries a CSRF token.
+2. Submitting a job saves it as `pending` and enqueues an Asynq task in
+   Redis. LinkedIn job IDs (up to 10) become one job each.
+3. The worker fetches the posting or uses the pasted text, calls Bedrock
+   once to extract the title, company and description, then again to score
+   the resume, and saves the result as `scored`.
+4. Each call's tokens are added to the user's `tokens_used` with an atomic
+   SQL update. The default budget is 100,000 tokens per user, shown as a
+   ring on the dashboard.
 
 ## Prerequisites
 
-* [An AWS Account](https://aws.amazon.com/console/)
+* [An AWS Account](https://aws.amazon.com/console/) with Bedrock access to
+  Claude Haiku in `us-east-1`
+* A **Route 53 public hosted zone** for the domain the app will use
 * [Install AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 * [Install Terraform](https://developer.hashicorp.com/terraform/install)
 * [Install Docker](https://docs.docker.com/engine/install/)
 * [Install jq](https://jqlang.github.io/jq/download/)
-* Bedrock model access enabled in `us-east-1` for Claude Haiku
 
-Region is hardcoded to `us-east-1`. No local Go installation is needed —
-the multi-stage Dockerfile handles `go mod tidy` and compilation inside
-the builder stage.
+The hostname is hardcoded for the author's domain: `APP_HOSTNAME` in
+`apply.sh` (`myjobs-go.mikes-cloud-solutions.com`) and `hosted_zone_name` in
+`03-ecs/variables.tf` (`mikes-cloud-solutions.com`). Change both, and the URL
+in `validate.sh`, to a zone you own.
 
-If this is your first time using AWS with Terraform, we recommend starting
-with this video:
-**[AWS + Terraform: Easy Setup](https://www.youtube.com/watch?v=9clW3VQLyxA)**
+To set SMTP credentials, export `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USER` and
+`SMTP_PASSWORD` before deploying; otherwise the SMTP secrets are empty.
 
-### Optional: SMTP (Forgot Password)
+If this is your first time following along, we recommend starting with this
+video: [AWS + Terraform: Easy Setup](https://www.youtube.com/watch?v=9clW3VQLyxA).
 
-Password-reset email requires an SMTP relay. Export these before running
-`apply.sh`; if unset the app deploys normally but password-reset emails
-will silently fail:
-
-```bash
-export SMTP_SERVER="smtp.improvmx.com"
-export SMTP_PORT=587
-export SMTP_USER="your-smtp-user"
-export SMTP_PASSWORD="your-smtp-password"
-```
-
-## Download this Repository
+## Deploy
 
 ```bash
 git clone https://github.com/mamonaco1973/aws-resume-go.git
 cd aws-resume-go
+./apply.sh
 ```
 
-## Build the Code
+`apply.sh` applies `01-network`, builds the image tagged with a timestamp
+and pushes it to ECR, then applies `03-ecs` with that image and the
+hostname. It ends by running `validate.sh`, which polls the sign-in page
+until it returns HTTP 200:
 
-Run [check_env](check_env.sh) to validate your environment, then run
-[apply](apply.sh) to provision all infrastructure and deploy the application.
-
-```bash
-~/aws-resume-go$ ./apply.sh
-NOTE: Running environment validation...
-NOTE: Validating that required commands are found in your PATH.
-NOTE: aws is found in the current PATH.
-NOTE: terraform is found in the current PATH.
-NOTE: docker is found in the current PATH.
-NOTE: jq is found in the current PATH.
-NOTE: Successfully logged into AWS.
-NOTE: Building network infrastructure...
-...
-NOTE: Building and pushing Docker image to ECR...
-...
-NOTE: Deploying ECS Fargate cluster and service...
-...
-NOTE: Waiting for https://myjobs-go.mikes-cloud-solutions.com/signin to return HTTP 200...
+```
+NOTE: Waiting for https://myjobs-ror.mikes-cloud-solutions.com/signin to return HTTP 200...
 NOTE: Resume Scorer is healthy (HTTP 200).
-NOTE: Deployment complete.
-NOTE: Resume Scorer URL:  https://myjobs-go.mikes-cloud-solutions.com
-NOTE: Demo login:         demo@example.com / password123
+NOTE: Demo login: demo@example.com / password123
 ```
 
-`apply.sh` runs four phases in order:
+## Try it
 
-1. **Phase 1 — Network Infrastructure** (`01-network/`): Provisions VPC,
-   subnets, Internet Gateway, NAT Gateway, RDS PostgreSQL 16, ElastiCache
-   Redis 7, ECR repository, S3 bucket for uploads, and Secrets Manager entries
-   for all credentials (including SMTP if provided).
-2. **Phase 2 — Docker Build** (`02-docker/resumescorer/`): Builds the Go
-   container image inside a multi-stage Dockerfile (`go mod tidy` + `go build`
-   in a `golang:1.22-alpine` builder, result copied to `alpine:3.19` runtime)
-   and pushes it to ECR.
-3. **Phase 3 — ECS Fargate** (`03-ecs/`): Deploys the ECS cluster, ALB, ACM
-   certificate, Route 53 records, task definition, and ECS service. Secrets
-   Manager ARNs are wired into the task definition so credentials are injected
-   at task startup. ACM DNS validation can take up to 5 minutes on a fresh deploy.
-4. **Phase 4 — Validation**: Polls the sign-in endpoint until the Go binary
-   responds HTTP 200. Fargate tasks typically start in 2–4 minutes.
+1. Open `https://<your hostname>` and sign in as `demo@example.com` /
+   `password123`. The seed data gives this user 2 resumes, 2 folders and 2
+   scored jobs. Or register at `/signup`.
+2. Under **Resumes**, add a resume and paste its text.
+3. Under **Score a Job**, give a job URL, LinkedIn job IDs (one per line) or
+   the pasted description, pick a resume and optionally a folder, and
+   submit. The dashboard refreshes while the job goes from `pending` to
+   `scoring` to `scored`.
+4. Open a scored job for the analysis and the extracted description, add
+   notes, and upload attachments. Score badges are green at 75 and above,
+   yellow at 50 and above, and red below 50; folders and a keyword search
+   filter the dashboard.
 
-### Build Results
-
-When deployment completes, the following resources exist in `us-east-1`:
-
-- **Networking:**
-  - VPC `10.0.0.0/23` with 2 private and 2 public subnets across 2 AZs
-  - Internet Gateway, NAT Gateway, route tables for private subnet egress
-
-- **Database Layer:**
-  - RDS PostgreSQL 16 (`db.t3.micro`, 20 GB) in private subnets
-  - ElastiCache Redis 7 (`cache.t3.micro`, single node) in private subnets
-  - Passwords randomly generated by Terraform; stored in Secrets Manager
-  - Schema created by GORM AutoMigrate on first container start
-
-- **Storage:**
-  - S3 bucket (`resumescorer-uploads-<random>`) for file attachments
-  - Public access blocked; IAM role grants ECS task read/write access
-
-- **Container Infrastructure:**
-  - ECR repository `resumescorer` holding the Go application image (~20 MB)
-  - ECS Fargate cluster (1 vCPU / 2 GB) with Container Insights enabled
-  - CloudWatch log group `/ecs/resumescorer` (7-day retention)
-
-- **Application Load Balancer:**
-  - ALB in public subnets, HTTPS (port 443) termination with ACM certificate
-  - HTTP (port 80) redirects to HTTPS
-  - Health check against `/signin`
-
-- **Security & IAM:**
-  - ALB security group (ports 80/443 inbound from internet)
-  - ECS task security group (port 3000 from ALB only; RDS/Redis from VPC CIDR)
-  - ECS task execution role: pull from ECR, write CloudWatch, read 6 secrets
-  - ECS task runtime role: S3 read/write, Bedrock `InvokeModel`, SSM ECS Exec
-
-- **Secrets Manager:**
-  - `resumescorer_database_url` — full `postgresql://` connection string
-  - `resumescorer_redis_url` — `redis://` endpoint with database index
-  - `resumescorer_secret_key_base` — 128-character random key for session signing
-  - `resumescorer_bedrock_model_id` — Claude Haiku model ID string
-  - `resumescorer_smtp_user` — SMTP username (empty if not provided)
-  - `resumescorer_smtp_password` — SMTP password (empty if not provided)
-
-## Demo User
-
-Seed data is loaded automatically on first deploy.
-
-| Email | Password | Notes |
-|---|---|---|
-| `demo@example.com` | `password123` | 2 resumes, 2 folders, 2 pre-scored jobs |
-
-You can register additional accounts at `/signup`.
-
-## Using the Application
-
-### Add a Resume
-
-1. Sign in and navigate to **Resumes** in the nav bar.
-2. Click **New Resume**, give it a name, and paste the resume text directly
-   into the form. The full text is stored in the database and used at
-   scoring time.
-
-### Score a Job
-
-1. Navigate to **Score a Job**.
-2. Choose a source: paste a job URL, enter LinkedIn Job IDs (one per line,
-   up to 10), or paste raw job text directly.
-3. Select the resume to score against and optionally assign a folder.
-4. Submit — the job appears immediately with status `pending`, then
-   `scoring`, then `scored` as the Asynq worker processes it in the
-   background. The dashboard auto-refreshes while jobs are in flight.
-
-### View Results
-
-- The **Dashboard** shows all scored jobs with color-coded score badges
-  (green ≥ 75, yellow ≥ 50, red below 50) and a token usage ring.
-- Click a job to see the full AI analysis (Overview, Strengths, Weaknesses),
-  add personal notes, upload file attachments, and read the extracted job
-  description.
-
-### Organize
-
-- Create **Folders** to group related jobs (e.g., "Remote Python Roles").
-- Filter the dashboard by folder or keyword.
-
-## Application Structure
-
-```
-01-network/                        # Terraform: VPC, RDS, Redis, ECR, S3, Secrets
-03-ecs/                            # Terraform: ECS Fargate, ALB, ACM, Route 53, IAM
-02-docker/resumescorer/            # Go application
-  main.go                          # Entry point: DB retry, Asynq goroutine, Gin server
-  go.mod                           # Module dependencies (Go 1.22)
-  Dockerfile                       # Multi-stage: golang:1.22-alpine → alpine:3.19
-  startup.sh                       # Thin entrypoint — exec ./resumescorer
-  internal/
-    config/config.go               # Env var loading (mustEnv panics on missing)
-    db/db.go                       # GORM connect + AutoMigrate
-    models/                        # user, resume, folder, job, attachment
-    handlers/                      # auth, dashboard, jobs, resumes, folders, attachments
-    middleware/middleware.go        # RequireAuth, CSRF, MethodOverride
-    worker/scoring.go              # Asynq task handler (Bedrock extract + score)
-    storage/s3.go                  # S3 upload, presign, delete
-    seeds/seeds.go                 # Idempotent demo data
-    tmpl/tmpl.go                   # Pre-parsed template sets + helper funcs
-  templates/
-    layout.html                    # Nav, flash, confirm modal
-    dashboard/index.html           # Job table, token ring, auto-refresh
-    jobs/                          # new, show
-    resumes/                       # index, new, show
-    folders/                       # index, new
-    auth/                          # signin, signup
-  public/
-    favicon.ico
-apply.sh
-destroy.sh
-check_env.sh
-validate.sh
-```
-
-## Destroy
+## Teardown
 
 ```bash
 ./destroy.sh
 ```
 
-Tears down all resources in reverse dependency order:
+## Notes
 
-1. ECS Fargate service and ALB (`03-ecs/`)
-2. ECR repository (force-deletes all images)
-3. Secrets Manager entries (force-delete bypasses recovery window so
-   re-deploys can reuse the same secret names)
-4. Network infrastructure — VPC, RDS, ElastiCache, S3 (`01-network/`)
+- **Lab only.** Anyone can register, and the seeded demo user has a known
+  password.
+- The load balancer's health check requests `/users/sign_in` (the Rails
+  path) and expects `200`, but the Go app serves sign-in at `/signin`, so
+  the check gets a 404. If the target group marks the task unhealthy,
+  `/users/sign_in` is the place to look.
+- `apply.sh` deploys `myjobs-go.…`, but `validate.sh` and the
+  `app_hostname` default in `03-ecs/variables.tf` use `myjobs-ror.…`, so
+  `validate.sh` checks the Rails app's hostname.
+- The app reads the SMTP settings, but this version has no password-reset
+  route that uses them.
